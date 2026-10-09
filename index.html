@@ -1,0 +1,535 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Eye Movement Examination — Educational Prototype</title>
+  <style>
+    :root { color-scheme: dark; --bg:#0c1420; --panel:#142235; --line:#2a4058; --text:#edf4fb; --muted:#b8c8d8; --accent:#3ea6ff; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--text); font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; }
+    header { padding:16px 18px 10px; background:#101d2d; border-bottom:1px solid var(--line); }
+    h1 { margin:0 0 6px; font-size:1.25rem; }
+    .subtitle { margin:0; color:var(--muted); font-size:.9rem; }
+    main { max-width:1000px; margin:0 auto; padding:12px; }
+    .notice { padding:10px 12px; background:#322a18; border:1px solid #65542a; border-radius:10px; color:#ffe9b0; font-size:.86rem; line-height:1.45; margin-bottom:12px; }
+    .statusbar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:8px 0 10px; }
+    #status { flex:1 1 230px; font-size:.9rem; color:#d8e6f3; min-height:24px; }
+    .pill { padding:5px 9px; background:#20344a; border-radius:20px; font-size:.78rem; color:#d1e5f7; }
+    #stage { position:relative; width:100%; height:min(49vh,520px); min-height:285px; border:1px solid #314962; border-radius:14px; overflow:hidden; background:radial-gradient(ellipse at center,#0d1623 0%,#030609 100%); touch-action:manipulation; }
+    .crosshair { position:absolute; left:50%; top:50%; width:1px; height:1px; background:#42566c; opacity:.18; }
+    #target { display:none; position:absolute; left:50%; top:50%; width:24px; height:24px; border-radius:50%; background:#ff3333; border:3px solid white; box-shadow:0 0 14px #ff3333; transform:translate(-50%,-50%); z-index:3; }
+    .gazeDot { display:none; position:absolute; width:14px; height:14px; border-radius:50%; transform:translate(-50%,-50%); z-index:2; border:2px solid white; }
+    #gazeDot { background:#31d6ff; box-shadow:0 0 8px #31d6ff; }
+    #gazeDotB { background:#b6ff4a; box-shadow:0 0 8px #b6ff4a; width:10px; height:10px; }
+    .stageLabel { position:absolute; top:10px; left:12px; color:#b9c9da; font-size:.8rem; z-index:1; pointer-events:none; }
+    .legend { display:flex; gap:12px; flex-wrap:wrap; color:var(--muted); font-size:.8rem; padding:8px 2px; }
+    .legend span { display:flex; gap:6px; align-items:center; }
+    .key { width:10px; height:10px; border-radius:50%; display:inline-block; }
+    .controls { display:flex; flex-wrap:wrap; gap:8px; margin:10px 0; }
+    button { appearance:none; border:0; border-radius:9px; padding:11px 13px; background:var(--accent); color:#061321; font-size:.92rem; font-weight:700; cursor:pointer; }
+    button.secondary { background:#263c52; color:#edf4fb; border:1px solid #3c5773; }
+    button.stop { background:#692a32; color:#fff; }
+    button:disabled { opacity:.42; cursor:not-allowed; }
+    .cameraRow { display:grid; grid-template-columns:minmax(0,1fr); gap:10px; }
+    .card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:12px; min-width:0; }
+    .card h2 { font-size:1rem; margin:0 0 8px; }
+    #video { display:block; width:100%; max-height:230px; object-fit:cover; background:#000; border-radius:8px; transform:scaleX(-1); }
+    .small { color:var(--muted); font-size:.82rem; line-height:1.5; }
+    #resultBox { margin-top:12px; }
+    #resultSummary { line-height:1.55; }
+    .tableWrap { overflow-x:auto; }
+    table { width:100%; border-collapse:collapse; font-size:.82rem; margin-top:8px; }
+    th,td { border-bottom:1px solid var(--line); padding:8px 6px; text-align:left; white-space:nowrap; }
+    th { color:#d2e7fa; background:#192d42; }
+    .warn { color:#ffdb8a; }
+    .good { color:#9ef0bb; }
+    .bad { color:#ffabab; }
+    .hidden { display:none !important; }
+    details { margin-top:10px; }
+    summary { cursor:pointer; color:#cbdff2; }
+    footer { padding:20px 12px 28px; text-align:center; font-size:.78rem; color:#94a8bc; }
+    @media (min-width:760px) { .cameraRow { grid-template-columns: minmax(300px, .85fr) minmax(0,1.15fr); } #video { max-height:300px; } }
+  </style>
+</head>
+<body>
+<header>
+  <h1>Eye Movement Examination</h1>
+  <p class="subtitle">Camera-based educational prototype · Extraocular movement tracking</p>
+</header>
+<main>
+  <div class="notice"><strong>Research / exhibition prototype only.</strong> This application is not clinically validated and cannot diagnose CN III, CN IV or CN VI palsy. Camera-based tracking differences can result from lighting, calibration, glasses, head movement or model error. Do not use it to make medical decisions.</div>
+  <div class="statusbar">
+    <div id="status" aria-live="polite">Step 1: Start the camera.</div>
+    <span class="pill" id="cameraBadge">Camera: off</span>
+    <span class="pill" id="modelBadge">Face model: not loaded</span>
+  </div>
+
+  <div id="stage" aria-label="Target movement area">
+    <div class="stageLabel" id="stageLabel">The red target will move here</div>
+    <div class="crosshair"></div>
+    <div id="target"></div>
+    <div id="gazeDot" class="gazeDot" title="Estimated gaze from camera"></div>
+    <div id="gazeDotB" class="gazeDot" title="Second-eye estimate"></div>
+  </div>
+  <div class="legend">
+    <span><i class="key" style="background:#ff3333"></i>Red: target to follow</span>
+    <span><i class="key" style="background:#31d6ff"></i>Blue: camera-estimated gaze, eye A</span>
+    <span><i class="key" style="background:#b6ff4a"></i>Green: camera-estimated gaze, eye B</span>
+  </div>
+
+  <div class="controls">
+    <button id="startCameraBtn">1. Start camera</button>
+    <button id="calibrateBtn" disabled>2. Calibrate gaze</button>
+    <button id="testBtn" disabled>3. Run eye-movement task</button>
+    <button id="stopBtn" class="stop" disabled>Stop camera</button>
+    <button id="resetBtn" class="secondary">Reset results</button>
+  </div>
+
+  <div class="cameraRow">
+    <section class="card">
+      <h2>Live front camera</h2>
+      <video id="video" autoplay muted playsinline></video>
+      <p class="small">Sit about 40–60 cm from the tablet. Keep your head facing forward, use even lighting, and follow the red target with your eyes. The preview is mirrored for convenience.</p>
+    </section>
+    <section class="card">
+      <h2>How to use this prototype</h2>
+      <ol class="small">
+        <li>Tap <b>Start camera</b> and grant camera permission.</li>
+        <li>When the face model has loaded, tap <b>Calibrate gaze</b>. Look at each red target and keep your head still.</li>
+        <li>After calibration, tap <b>Run eye-movement task</b> and follow the moving red target.</li>
+        <li>Review the tracking report at the bottom. Large differences mean the tracking needs review; they do not prove a medical defect.</li>
+      </ol>
+      <p class="small"><b>Privacy:</b> this page does not save video or send camera frames to a server. The face-landmark model files and software are downloaded from Google/CDN servers. Close the camera when finished.</p>
+    </section>
+  </div>
+
+  <section class="card" id="resultBox">
+    <h2>Session report</h2>
+    <p id="resultSummary" class="small">No examination has been run yet.</p>
+    <div class="tableWrap" id="resultsTableWrap"></div>
+    <details>
+      <summary>Important limitations</summary>
+      <p class="small">This first version estimates gaze from iris position relative to visible eye landmarks. It is not calibrated in degrees, has not been validated against a clinical eye-movement examination, and may miss or falsely flag abnormalities. It cannot determine the cause of an abnormal movement or localise a lesion to a specific cranial nerve. A real assessment requires a trained clinician and an appropriate examination.</p>
+    </details>
+  </section>
+</main>
+<footer>Educational tool only · No diagnostic claims · Stop camera after use</footer>
+
+<script type="module">
+  import { FaceLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.1.0/vision_bundle.mjs";
+
+  const MODEL_URL = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task";
+  const WASM_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.1.0/wasm";
+
+  const $ = (id) => document.getElementById(id);
+  const video = $("video");
+  const target = $("target");
+  const stage = $("stage");
+  const statusEl = $("status");
+  const startCameraBtn = $("startCameraBtn");
+  const calibrateBtn = $("calibrateBtn");
+  const testBtn = $("testBtn");
+  const stopBtn = $("stopBtn");
+  const resetBtn = $("resetBtn");
+  const gazeDotA = $("gazeDot");
+  const gazeDotB = $("gazeDotB");
+
+  let stream = null;
+  let landmarker = null;
+  let animationFrameId = null;
+  let lastVideoTime = -1;
+  let cameraActive = false;
+  let faceVisible = false;
+  let lastFeatures = null;
+  let captureBuffer = null;
+  let isBusy = false;
+  let calibration = null;
+  let sessionResults = [];
+
+  // Landmark indices used by the MediaPipe Face Landmarker face mesh.
+  // Each eye is tracked separately so their estimates can be compared.
+  function eyeFeature(lm, irisIndex, corner1, corner2, lid1, lid2) {
+    const iris = lm[irisIndex];
+    const c1 = lm[corner1];
+    const c2 = lm[corner2];
+    const l1 = lm[lid1];
+    const l2 = lm[lid2];
+    if (!iris || !c1 || !c2 || !l1 || !l2) return null;
+    const width = Math.abs(c2.x - c1.x);
+    const height = Math.abs(l2.y - l1.y);
+    if (width < 0.0001 || height < 0.0001) return null;
+    return {
+      x: (iris.x - Math.min(c1.x, c2.x)) / width,
+      y: (iris.y - Math.min(l1.y, l2.y)) / height
+    };
+  }
+
+  function getFeatures(lm) {
+    // MediaPipe's usual face-landmarker model exposes 478 landmarks including iris landmarks.
+    if (!lm || lm.length < 478) return null;
+    const a = eyeFeature(lm, 468, 33, 133, 159, 145);
+    const b = eyeFeature(lm, 473, 362, 263, 386, 374);
+    if (!a || !b || !Number.isFinite(a.x) || !Number.isFinite(a.y) || !Number.isFinite(b.x) || !Number.isFinite(b.y)) return null;
+    return { a, b, time: performance.now() };
+  }
+
+  function mean(list) {
+    if (!list.length) return null;
+    const sum = list.reduce((acc, p) => ({ x: acc.x + p.x, y: acc.y + p.y }), { x: 0, y: 0 });
+    return { x: sum.x / list.length, y: sum.y / list.length };
+  }
+
+  function averageFeatures(list) {
+    const valid = list.filter(Boolean);
+    if (!valid.length) return null;
+    return { a: mean(valid.map(v => v.a)), b: mean(valid.map(v => v.b)), count: valid.length };
+  }
+
+  function setStatus(message) { statusEl.textContent = message; }
+  function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+  function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+  function putAt(element, x, y) {
+    element.style.left = x + "%";
+    element.style.top = y + "%";
+  }
+
+  function showTarget(point, label) {
+    target.style.display = "block";
+    putAt(target, point.x, point.y);
+    $("stageLabel").textContent = label || point.name || "Follow the red target";
+  }
+
+  function hideTargets() {
+    target.style.display = "none";
+    gazeDotA.style.display = "none";
+    gazeDotB.style.display = "none";
+  }
+
+  // Map observed iris position to approximate screen coordinates using the calibration anchors.
+  // This is an unvalidated 2-D estimate, not a clinical measurement in degrees.
+  function mapOneEye(feature, anchors) {
+    if (!feature || !anchors) return null;
+    const l = anchors.left, r = anchors.right, u = anchors.up, d = anchors.down;
+    const dx = r.x - l.x;
+    const dy = d.y - u.y;
+    if (Math.abs(dx) < 0.018 || Math.abs(dy) < 0.018) return null;
+    return {
+      x: clamp(20 + ((feature.x - l.x) / dx) * 60, 0, 100),
+      y: clamp(22 + ((feature.y - u.y) / dy) * 56, 0, 100)
+    };
+  }
+
+  function estimateGaze(features) {
+    if (!calibration || !features) return null;
+    return {
+      a: mapOneEye(features.a, calibration.a),
+      b: mapOneEye(features.b, calibration.b)
+    };
+  }
+
+  function updateGazeDots(features) {
+    if (!calibration || !features) return;
+    const gaze = estimateGaze(features);
+    if (gaze?.a) {
+      gazeDotA.style.display = "block";
+      putAt(gazeDotA, gaze.a.x, gaze.a.y);
+    } else gazeDotA.style.display = "none";
+    if (gaze?.b) {
+      gazeDotB.style.display = "block";
+      putAt(gazeDotB, gaze.b.x, gaze.b.y);
+    } else gazeDotB.style.display = "none";
+  }
+
+  async function loadModel() {
+    if (landmarker) return;
+    $("modelBadge").textContent = "Face model: loading…";
+    setStatus("Loading the face-landmark model. The first download may take a little while.");
+    const vision = await FilesetResolver.forVisionTasks(WASM_URL);
+    landmarker = await FaceLandmarker.createFromOptions(vision, {
+      baseOptions: { modelAssetPath: MODEL_URL, delegate: "CPU" },
+      runningMode: "VIDEO",
+      numFaces: 1,
+      outputFaceBlendshapes: false,
+      outputFacialTransformationMatrixes: false
+    });
+    $("modelBadge").textContent = "Face model: ready";
+  }
+
+  function renderLoop() {
+    if (!cameraActive) return;
+    try {
+      if (landmarker && video.readyState >= 2 && video.currentTime !== lastVideoTime) {
+        lastVideoTime = video.currentTime;
+        const result = landmarker.detectForVideo(video, performance.now());
+        const landmarks = result.faceLandmarks && result.faceLandmarks[0];
+        faceVisible = Boolean(landmarks);
+        if (landmarks) {
+          lastFeatures = getFeatures(landmarks);
+          if (lastFeatures && captureBuffer) captureBuffer.push(lastFeatures);
+          if (lastFeatures) updateGazeDots(lastFeatures);
+        } else {
+          lastFeatures = null;
+          gazeDotA.style.display = "none";
+          gazeDotB.style.display = "none";
+        }
+        if (!faceVisible && !isBusy) setStatus("No face detected. Centre your face in the camera and improve the lighting.");
+        else if (faceVisible && !lastFeatures && !isBusy) setStatus("Face found, but iris landmarks are unavailable. Check camera focus and lighting.");
+        else if (faceVisible && lastFeatures && !isBusy && !calibration) setStatus("Face and iris landmarks detected. Next: calibrate gaze.");
+      }
+    } catch (err) {
+      console.error(err);
+      if (!isBusy) setStatus("Tracking error. Stop the camera and restart the page if it continues.");
+    }
+    animationFrameId = requestAnimationFrame(renderLoop);
+  }
+
+  async function startCamera() {
+    if (cameraActive || isBusy) return;
+    try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error("Camera access is unavailable. Open this page over HTTPS or localhost in a browser that supports camera access.");
+      }
+      startCameraBtn.disabled = true;
+      setStatus("Requesting front-camera permission…");
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } }
+      });
+      video.srcObject = stream;
+      await video.play();
+      cameraActive = true;
+      $("cameraBadge").textContent = "Camera: on";
+      stopBtn.disabled = false;
+      await loadModel();
+      calibrateBtn.disabled = false;
+      setStatus("Camera and model ready. Sit still, then calibrate gaze.");
+      renderLoop();
+    } catch (err) {
+      console.error(err);
+      if (stream) stream.getTracks().forEach(track => track.stop());
+      stream = null;
+      video.srcObject = null;
+      cameraActive = false;
+      startCameraBtn.disabled = false;
+      $("cameraBadge").textContent = "Camera: off";
+      $("modelBadge").textContent = landmarker ? "Face model: ready" : "Face model: not loaded";
+      setStatus("Could not start: " + (err.message || "camera/model permission error"));
+    }
+  }
+
+  function anchorAverage(calibSamples) {
+    return {
+      a: mean(calibSamples.map(s => s.a)),
+      b: mean(calibSamples.map(s => s.b))
+    };
+  }
+
+  async function sampleAt(point, label, waitMs = 650, sampleMs = 1150) {
+    showTarget(point, label);
+    await sleep(waitMs);
+    const samples = [];
+    captureBuffer = samples;
+    await sleep(sampleMs);
+    captureBuffer = null;
+    return averageFeatures(samples);
+  }
+
+  async function runCalibration() {
+    if (!cameraActive || !landmarker || isBusy) return;
+    isBusy = true;
+    calibration = null;
+    testBtn.disabled = true;
+    calibrateBtn.disabled = true;
+    sessionResults = [];
+    $("resultsTableWrap").innerHTML = "";
+    $("resultSummary").textContent = "Calibration in progress…";
+    const points = [
+      { name: "Centre", key: "center", x: 50, y: 50 },
+      { name: "Look LEFT", key: "left", x: 20, y: 50 },
+      { name: "Look RIGHT", key: "right", x: 80, y: 50 },
+      { name: "Look UP", key: "up", x: 50, y: 22 },
+      { name: "Look DOWN", key: "down", x: 50, y: 78 }
+    ];
+    const collected = {};
+    try {
+      for (let i = 0; i < points.length; i++) {
+        const p = points[i];
+        setStatus(`Calibration ${i + 1}/${points.length}: look at the red target — ${p.name}. Keep your head still.`);
+        const sampled = await sampleAt(p, `CALIBRATION: ${p.name}`, 700, 1200);
+        if (!sampled || sampled.count < 8) {
+          throw new Error("Too few usable eye samples. Keep your face visible, improve lighting, and try again.");
+        }
+        collected[p.key] = sampled;
+      }
+      calibration = {
+        a: { left: collected.left.a, right: collected.right.a, up: collected.up.a, down: collected.down.a, center: collected.center.a },
+        b: { left: collected.left.b, right: collected.right.b, up: collected.up.b, down: collected.down.b, center: collected.center.b },
+        featureSpans: {
+          eyeAHorizontal: Math.abs(collected.right.a.x - collected.left.a.x),
+          eyeAVertical: Math.abs(collected.down.a.y - collected.up.a.y),
+          eyeBHorizontal: Math.abs(collected.right.b.x - collected.left.b.x),
+          eyeBVertical: Math.abs(collected.down.b.y - collected.up.b.y)
+        }
+      };
+      const spans = Object.values(calibration.featureSpans);
+      if (spans.some(v => !Number.isFinite(v) || v < 0.018)) {
+        calibration = null;
+        throw new Error("Calibration did not capture a clear enough iris-position change. This may be due to camera quality, lighting, glasses, head movement or limited gaze range. Reposition and try again.");
+      }
+      gazeDotA.style.display = "block";
+      gazeDotB.style.display = "block";
+      testBtn.disabled = false;
+      $("resultSummary").textContent = "Calibration completed. The blue and green markers show rough, separate estimates from the two eyes. This is not a clinical measurement.";
+      setStatus("Calibration completed. Run the eye-movement task when ready.");
+      showTarget({x:50,y:50,name:"Centre"}, "READY: start the eye-movement task");
+    } catch (err) {
+      console.error(err);
+      calibration = null;
+      $("resultSummary").textContent = "Calibration unsuccessful: " + err.message;
+      setStatus(err.message);
+      hideTargets();
+    } finally {
+      isBusy = false;
+      calibrateBtn.disabled = !cameraActive;
+    }
+  }
+
+  function calculateTaskRecord(point, sampled) {
+    if (!sampled) return { name: point.name, targetX: point.x, targetY: point.y, eyeA: null, eyeB: null, difference: null, samples: 0 };
+    const gaze = estimateGaze(sampled);
+    const a = gaze?.a || null;
+    const b = gaze?.b || null;
+    let difference = null;
+    if (a && b) difference = Math.hypot(a.x - b.x, a.y - b.y);
+    return {
+      name: point.name,
+      targetX: point.x,
+      targetY: point.y,
+      eyeA: a,
+      eyeB: b,
+      difference,
+      samples: sampled.count
+    };
+  }
+
+  async function runTask() {
+    if (!cameraActive || !calibration || isBusy) return;
+    isBusy = true;
+    testBtn.disabled = true;
+    calibrateBtn.disabled = true;
+    sessionResults = [];
+    const points = [
+      { name: "Centre", x: 50, y: 50 },
+      { name: "Right", x: 80, y: 50 },
+      { name: "Centre", x: 50, y: 50 },
+      { name: "Left", x: 20, y: 50 },
+      { name: "Centre", x: 50, y: 50 },
+      { name: "Up", x: 50, y: 22 },
+      { name: "Centre", x: 50, y: 50 },
+      { name: "Down", x: 50, y: 78 },
+      { name: "Upper right", x: 80, y: 22 },
+      { name: "Upper left", x: 20, y: 22 },
+      { name: "Lower left", x: 20, y: 78 },
+      { name: "Lower right", x: 80, y: 78 },
+      { name: "Centre", x: 50, y: 50 }
+    ];
+    $("resultSummary").textContent = "Task running. Follow the red target with your eyes; keep your head still.";
+    $("resultsTableWrap").innerHTML = "";
+    try {
+      for (let i = 0; i < points.length; i++) {
+        const p = points[i];
+        setStatus(`Task ${i + 1}/${points.length}: follow the red target — ${p.name}.`);
+        const sampled = await sampleAt(p, `TASK: ${p.name}`, 350, 900);
+        sessionResults.push(calculateTaskRecord(p, sampled));
+      }
+      showReport(sessionResults);
+      setStatus("Task completed. Review the report and its limitations.");
+      showTarget({x:50,y:50,name:"Centre"}, "TASK COMPLETE");
+    } catch (err) {
+      console.error(err);
+      setStatus("Task stopped: " + err.message);
+    } finally {
+      isBusy = false;
+      testBtn.disabled = !calibration;
+      calibrateBtn.disabled = !cameraActive;
+    }
+  }
+
+  function fmtPoint(p) {
+    return p ? `${p.x.toFixed(0)}%, ${p.y.toFixed(0)}%` : "Unavailable";
+  }
+
+  function showReport(rows) {
+    const usable = rows.filter(r => r.eyeA && r.eyeB && Number.isFinite(r.difference));
+    if (usable.length < 5) {
+      $("resultSummary").innerHTML = '<span class="warn">INCONCLUSIVE:</span> Too few usable eye-tracking samples were obtained. Repeat with improved lighting and camera positioning.';
+      $("resultsTableWrap").innerHTML = "";
+      return;
+    }
+    const meanDifference = usable.reduce((s, r) => s + r.difference, 0) / usable.length;
+    const largeDivergence = usable.filter(r => r.difference > 24);
+    const lowSamples = rows.filter(r => r.samples < 8);
+    let headline;
+    if (lowSamples.length >= 3) {
+      headline = '<span class="warn">INCONCLUSIVE TRACKING:</span> several target positions had insufficient samples. Repeat the task; this does not indicate a defect.';
+    } else if (largeDivergence.length > 0) {
+      headline = `<span class="warn">TRACKING DIFFERENCE OBSERVED:</span> the two camera-based gaze estimates differed by more than 24 screen-percentage points at ${largeDivergence.length} sampled position(s). This can be a technical error or a genuine eye-movement difference; this prototype cannot distinguish them.`;
+    } else {
+      headline = '<span class="good">NO LARGE BINOCULAR TRACKING DIFFERENCE FLAGGED BY THIS PROTOTYPE.</span> This is not proof that eye movements or cranial nerves are normal.';
+    }
+    $("resultSummary").innerHTML = `${headline}<br><br><b>Mean difference between the two estimated gaze markers:</b> ${meanDifference.toFixed(1)} screen-percentage points. This is an unvalidated screen-coordinate measure, not an angle or clinical score. <br><b>Next step:</b> If there are symptoms or concern, arrange an examination by a qualified clinician.`;
+
+    let html = '<table><thead><tr><th>Target</th><th>Eye A estimate (x,y)</th><th>Eye B estimate (x,y)</th><th>Difference</th><th>Samples</th></tr></thead><tbody>';
+    for (const r of rows) {
+      const diff = r.difference == null ? "—" : r.difference.toFixed(1);
+      const cl = r.difference != null && r.difference > 24 ? ' class="warn"' : '';
+      html += `<tr><td>${r.name}</td><td>${fmtPoint(r.eyeA)}</td><td>${fmtPoint(r.eyeB)}</td><td${cl}>${diff}</td><td>${r.samples}</td></tr>`;
+    }
+    html += '</tbody></table>';
+    $("resultsTableWrap").innerHTML = html;
+  }
+
+  function stopCamera() {
+    cameraActive = false;
+    if (animationFrameId) cancelAnimationFrame(animationFrameId);
+    animationFrameId = null;
+    if (stream) stream.getTracks().forEach(track => track.stop());
+    stream = null;
+    video.srcObject = null;
+    faceVisible = false;
+    lastFeatures = null;
+    captureBuffer = null;
+    isBusy = false;
+    startCameraBtn.disabled = false;
+    calibrateBtn.disabled = true;
+    testBtn.disabled = true;
+    stopBtn.disabled = true;
+    $("cameraBadge").textContent = "Camera: off";
+    $("modelBadge").textContent = landmarker ? "Face model: ready" : "Face model: not loaded";
+    hideTargets();
+    setStatus("Camera stopped. Start the camera to begin another session.");
+  }
+
+  function resetResults() {
+    if (isBusy) return;
+    calibration = null;
+    sessionResults = [];
+    hideTargets();
+    $("resultsTableWrap").innerHTML = "";
+    $("resultSummary").textContent = "No examination has been run yet.";
+    testBtn.disabled = true;
+    calibrateBtn.disabled = !cameraActive;
+    setStatus(cameraActive ? "Camera is on. Calibrate gaze to continue." : "Step 1: Start the camera.");
+  }
+
+  startCameraBtn.addEventListener("click", startCamera);
+  calibrateBtn.addEventListener("click", runCalibration);
+  testBtn.addEventListener("click", runTask);
+  stopBtn.addEventListener("click", stopCamera);
+  resetBtn.addEventListener("click", resetResults);
+  window.addEventListener("pagehide", stopCamera);
+</script>
+</body>
+</html>
